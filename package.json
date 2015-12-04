@@ -1,0 +1,24 @@
+{
+  "name": "eapi",
+  "version": "1.0.0",
+  "description": "api",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/burikhin/eapi.git"
+  },
+  "author": "Stanislav Burikhin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/burikhin/eapi/issues"
+  },
+  "homepage": "https://github.com/burikhin/eapi#readme",
+  "dependencies": {
+    "co": "^4.6.0",
+    "express": "^4.13.3",
+    "mongodb": "^2.0.49"
+  }
+}
