@@ -4,11 +4,18 @@ var MongoClient = require('mongodb').MongoClient;
 var co = require('co');
 
 app.get('/', function (req, res) {
-    res.send('Hello World!');
+    var help = "Api usage: " +
+        "\n/user/:id, " +
+        "\n/friends/:id/invite/:friend, " +
+        "\n/friends/:id/confirm/:friend, " +
+        "\n/friends/:id/decline/:friend" +
+        "\n/user/:id/invites" +
+        "\n/friends/:id" +
+        "\n/friends/:id/depth/:depth";
+    res.send(help);
 });
 
 app.get('/user/:id([0-9]+)', function (req, res) {
-    //req.params.id;
     MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
         if (err) {
             throw err;
@@ -19,26 +26,97 @@ app.get('/user/:id([0-9]+)', function (req, res) {
     });
 });
 
-app.post('/friends/:id([0-9]+)/add/:friend([0-9]+)', function (req, res) {
-    //req.params.id;
+app.post('/friends/:id([0-9]+)/invite/:friend([0-9]+)', function (req, res) {
     MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
         if (err) {
             throw err;
         }
-        db.collection('user').findOneAndUpdate({'id': req.params.id}).limit(1).next(function (err, doc) {
-            res.send(doc);
+        var col = db.collection('user');
+        var result = {ok: []};
+        col.findOneAndUpdate({'id': req.params.id}
+            , {$addToSet: {'sent_invites': req.params.friend}}
+            , {})
+            .then(function (r) {
+                result.ok.push(r.ok);
+                col.findOneAndUpdate({'id': req.params.friend}
+                    , {$addToSet: {'my_invites': req.params.id}}
+                    , {}
+                    , function (err, r) {
+                        result.ok.push(r.ok);
+                        console.log(r);
+                        res.send(result);
+                    });
+            });
+    });
+});
+
+app.post('/friends/:id([0-9]+)/confirm/:friend([0-9]+)', function (req, res) {
+    MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
+        if (err) {
+            throw err;
+        }
+        var col = db.collection('user');
+        var result = {ok: []};
+        col.findOneAndUpdate({'id': req.params.id, 'my_invites': {$in: [req.params.friend]}}
+            , {$addToSet: {'friends': req.params.friend}, $pull: {'my_invites': req.params.friend}}
+            , {})
+            .then(function (r) {
+                result.ok.push(r.ok);
+                col.findOneAndUpdate({'id': req.params.friend, 'sent_invites': {$in: [req.params.id]}}
+                    , {$addToSet: {'friends': req.params.id}, $pull: {'sent_invites': req.params.id}}
+                    , {}
+                    , function (err, r) {
+                        result.ok.push(r.ok);
+                        console.log(r);
+                        res.send(result);
+                    });
+            });
+    });
+});
+
+app.post('/friends/:id([0-9]+)/decline/:friend([0-9]+)', function (req, res) {
+    MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
+        if (err) {
+            throw err;
+        }
+        var col = db.collection('user');
+        var result = {ok: []};
+        col.findOneAndUpdate({'id': req.params.id, 'my_invites': {$in: [req.params.friend]}}
+            , {$pull: {'my_invites': req.params.friend}}
+            , {})
+            .then(function (r) {
+                result.ok.push(r.ok);
+                col.findOneAndUpdate({'id': req.params.friend, 'sent_invites': {$in: [req.params.id]}}
+                    , {$pull: {'sent_invites': req.params.id}}
+                    , {}
+                    , function (err, r) {
+                        result.ok.push(r.ok);
+                        console.log(r);
+                        res.send(result);
+                    });
+            });
+    });
+});
+
+app.get('/user/:id([0-9]+)/invites', function (req, res) {
+    MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
+        if (err) {
+            throw err;
+        }
+        db.collection('user').find({'id': req.params.id}).limit(1).next(function (err, doc) {
+            db.collection('user').find({'id': {$in: doc.my_invites}}).toArray(function (err, docs) {
+                res.send(docs);
+            });
         });
     });
 });
 
 app.get('/friends/:id([0-9]+)', function (req, res) {
-    //req.params.id;
     MongoClient.connect('mongodb://localhost:27017/rest', function (err, db) {
         if (err) {
             throw err;
         }
         db.collection('user').find({'id': req.params.id}).limit(1).next(function (err, doc) {
-            //console.log(doc.friends);
             db.collection('user').find({'id': {$in: doc.friends}}).toArray(function (err, docs) {
                 res.send(docs);
             });
@@ -48,7 +126,6 @@ app.get('/friends/:id([0-9]+)', function (req, res) {
 
 app.get('/friends/:id([0-9]+)/depth/:depth([0-9]+)', function (req, res) {
     console.log(req.params.id, req.params.depth);
-
     co(function*() {
         var db = yield MongoClient.connect('mongodb://localhost:27017/rest');
         var collection = db.collection('user');
@@ -70,13 +147,6 @@ app.get('/friends/:id([0-9]+)/depth/:depth([0-9]+)', function (req, res) {
             console.log("RESULT SET", result);
         }
         db.close();
-
-        //result = result.reduce(function (a, b) {
-        //    if (a.indexOf(b) < 0) a.push(b);
-        //    return a;
-        //}, []);
-
-        //console.log(result);
         var uniq = yield uniqObj(result);
         res.send(uniq);
     });
@@ -86,41 +156,21 @@ app.get('/friends/:id([0-9]+)/depth/:depth([0-9]+)', function (req, res) {
 var findFriends = function (collection, ids) {
     return co(function*() {
         var docs = yield collection.find({'id': {$in: ids}}).toArray();
-        //console.log(docs);
         var all_friends = [];
         for (var i = 0; i < docs.length; i++) {
             all_friends = all_friends.concat(docs[i].friends);
         }
-        console.log("FF", all_friends);
-        //console.log("INCLUDES", all_friends.indexOf('3') != -1);
-        //console.log("UNIQ", uniq(all_friends));
-        //console.log(all_friends);
+
         return yield collection.find({'id': {$in: all_friends}}).toArray();
     });
 };
-
-//function onlyUnique(value, index, self) {
-//    return self.indexOf(value) === index;
-//}
-//
-//function uniq(a) {
-//    var prims = {"boolean": {}, "number": {}, "string": {}}, objs = [];
-//
-//    return a.filter(function (item) {
-//        var type = typeof item;
-//        if (type in prims)
-//            return prims[type].hasOwnProperty(item) ? false : (prims[type][item] = true);
-//        else
-//        return objs.indexOf(item) >= 0 ? false : objs.push(item);
-//    });
-//}
 
 function uniqObj(a) {
     var ids = [];
     var uniq = [];
     var i = a.length;
     while (i--) {
-        console.log("123",a[i]);
+        console.log("123", a[i]);
         if (ids.indexOf(a[i].id) == -1) {
             console.log("IF");
             ids.push(a[i].id);
@@ -131,27 +181,9 @@ function uniqObj(a) {
     return uniq;
 }
 
-//app.get('/friends/:id([0-9]+)/depth/:depth([0-9]+)', function (req, res) {
-//    console.log(req.params.id, req.params.depth);
-//
-//    co(function*() {
-//        var db = yield MongoClient.connect('mongodb://localhost:27017/rest');
-//        var collection = db.collection('user');
-//        var result = [];
-//        for (var i = 0; i < req.params.depth; i++) {
-//            var docs = yield collection.find().toArray();
-//            result = result.concat(docs);
-//            console.log(docs, result);
-//        }
-//        db.close();
-//        console.log(result);
-//        res.send(result);
-//    });
-//});
-
 var server = app.listen(3000, function () {
     var host = server.address().address;
     var port = server.address().port;
 
-    console.log('Example app listening at http://%s:%s', host, port);
+    console.log('App listening at http://%s:%s', host, port);
 });
